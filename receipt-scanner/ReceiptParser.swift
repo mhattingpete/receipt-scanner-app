@@ -3,11 +3,29 @@ import SwiftUI
 import UIKit
 import Vision
 
+func recognizeText(in image: UIImage, completion: @escaping (String?) -> Void) {
+    guard #available(iOS 18.2, *) else {
+        recognizeTextWithVision(in: image, completion: completion)
+        return
+    }
+
+    Task.detached {
+        do {
+            let text = try await FastVLMReader.recognize(image)
+            await MainActor.run { completion(text) }
+        } catch {
+            print("FastVLM OCR failed:", error)
+            // Fallback to Vision if needed
+            recognizeTextWithVision(in: image, completion: completion)
+        }
+    }
+}
+
 // This file contains only the OCR and text parsing functionality
 // Image handling has been moved to ImageHelpers.swift
 
 /// Recognizes text from a given UIImage using Vision with improved accuracy.
-func recognizeText(in image: UIImage, completion: @escaping (String?) -> Void) {
+private func recognizeTextWithVision(in image: UIImage, completion: @escaping (String?) -> Void) {
     guard let cgImage = image.cgImage else {
         print("Error: Failed to get CGImage from UIImage")
         completion(nil)
