@@ -2,6 +2,8 @@
 import SwiftUI
 import UIKit
 import Vision
+import CoreImage
+import CoreImage.CIFilterBuiltins
 
 func recognizeText(in image: UIImage, completion: @escaping (String?) -> Void) {
     guard #available(iOS 18.2, *) else {
@@ -84,12 +86,93 @@ private func recognizeTextWithVision(in image: UIImage, completion: @escaping (S
 
 // Preprocesses the image to improve OCR accuracy
 private func preprocessImageForOCR(_ image: CGImage) -> CGImage {
-    // For now, just return the original image
-    // Future enhancements could include:
-    // - Contrast enhancement
-    // - Deskewing
-    // - Noise reduction
-    // - Binarization for text clarity
+    let context = CIContext()
+    let ciImage = CIImage(cgImage: image)
+    
+    // Step 1: Auto-adjust exposure and contrast
+    let adjustedImage = autoAdjustContrast(ciImage)
+    
+    // Step 2: Noise reduction
+    let denoisedImage = reduceNoise(adjustedImage)
+    
+    // Step 3: Edge enhancement for text clarity
+    let sharpenedImage = enhanceEdges(denoisedImage)
+    
+    // Step 4: Binarization for high contrast text
+    let binarizedImage = binarizeForOCR(sharpenedImage)
+    
+    // Convert back to CGImage
+    if let processedCGImage = context.createCGImage(binarizedImage, from: binarizedImage.extent) {
+        return processedCGImage
+    }
+    
+    // Fallback to original if preprocessing fails
+    return image
+}
+
+// MARK: - Image Preprocessing Helpers
+
+/// Auto-adjusts contrast and exposure for better text visibility
+private func autoAdjustContrast(_ image: CIImage) -> CIImage {
+    // Auto enhance filter for general improvements
+    let autoEnhance = CIFilter.colorControls()
+    autoEnhance.inputImage = image
+    autoEnhance.contrast = 1.2  // Slightly increase contrast
+    autoEnhance.brightness = 0.1  // Slightly increase brightness
+    autoEnhance.saturation = 0.8  // Reduce saturation to focus on text
+    
+    return autoEnhance.outputImage ?? image
+}
+
+/// Reduces camera noise while preserving text edges
+private func reduceNoise(_ image: CIImage) -> CIImage {
+    let noiseReduction = CIFilter.noiseReduction()
+    noiseReduction.inputImage = image
+    noiseReduction.noiseLevel = 0.02  // Light noise reduction to preserve text detail
+    noiseReduction.sharpness = 0.4   // Maintain some sharpness
+    
+    return noiseReduction.outputImage ?? image
+}
+
+/// Enhances edges to make text clearer
+private func enhanceEdges(_ image: CIImage) -> CIImage {
+    let unsharpMask = CIFilter.unsharpMask()
+    unsharpMask.inputImage = image
+    unsharpMask.radius = 2.5      // Edge detection radius
+    unsharpMask.intensity = 0.5   // Enhancement intensity
+    
+    return unsharpMask.outputImage ?? image
+}
+
+/// Converts image to high-contrast black and white for optimal OCR
+private func binarizeForOCR(_ image: CIImage) -> CIImage {
+    // First convert to grayscale
+    let grayscale = CIFilter.photoEffectMono()
+    grayscale.inputImage = image
+    
+    guard let grayImage = grayscale.outputImage else { return image }
+    
+    // Apply threshold to create high contrast
+    let threshold = CIFilter.colorThreshold()
+    threshold.inputImage = grayImage
+    threshold.threshold = 0.5  // Adjust threshold for text clarity
+    
+    return threshold.outputImage ?? grayImage
+}
+
+/// Detects and corrects perspective distortion in receipt images
+private func correctPerspective(_ image: CIImage) -> CIImage {
+    // For now, return original image
+    // Advanced implementation would use CIPerspectiveCorrection
+    // after detecting receipt corners with vision framework
+    return image
+}
+
+/// Detects receipt boundaries and crops to content area
+private func cropToReceiptBounds(_ image: CIImage) -> CIImage {
+    // For now, return original image
+    // Advanced implementation would detect receipt edges
+    // and crop to remove background
     return image
 }
 
@@ -238,6 +321,23 @@ func parseReceiptText(_ text: String) -> (
     }
 
     return (store, date, time, items)
+}
+
+// MARK: - FastVLM JSON convenience
+@available(iOS 18.2, *)
+func recognizeReceiptJSON(
+    in image: UIImage,
+    completion: @escaping (FastVLMReader.ReceiptJSON?) -> Void
+) {
+    Task.detached {
+        do {
+            let receipt = try await FastVLMReader.recognizeJSON(image)
+            await MainActor.run { completion(receipt) }
+        } catch {
+            print("FastVLM JSON recognition failed: \(error)")
+            await MainActor.run { completion(nil) }
+        }
+    }
 }
 
 // Helper to detect if a string looks like a date (to avoid false positive items)
